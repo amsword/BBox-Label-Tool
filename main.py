@@ -56,6 +56,7 @@ class LabelTool():
         self.bboxList = []
         self.hl = None
         self.vl = None
+        self.zoomLevel = 1.0
 
         # ----------------- GUI stuff ---------------------
         # dir entry & load
@@ -95,8 +96,9 @@ class LabelTool():
         # showing bbox info & delete bbox
         self.lb1 = Label(self.frame, text = 'Bounding boxes:')
         self.lb1.grid(row = 3, column = 2,  sticky = W+N)
-        self.listbox = Listbox(self.frame, width = 22, height = 12)
+        self.listbox = Listbox(self.frame, width = 30, height = 12)
         self.listbox.grid(row = 4, column = 2, sticky = N+S)
+        self.listbox.bind('<<ListboxSelect>>', self.lstSelected)
         self.btnDel = Button(self.frame, text = 'Delete', command = self.delBBox)
         self.btnDel.grid(row = 5, column = 2, sticky = W+E+N)
         self.btnClear = Button(self.frame, text = 'ClearAll', command = self.clearBBox)
@@ -196,8 +198,11 @@ class LabelTool():
         # load image
         imagepath = self.imageList[self.cur - 1]
         self.img = Image.open(imagepath)
-        self.tkimg = ImageTk.PhotoImage(self.img)
-        self.mainPanel.config(width = max(self.tkimg.width(), 400), height = max(self.tkimg.height(), 400))
+        self.zoomLevel = round(min(1200/self.img.size[0], 900/self.img.size[1]) - 0.05, 1) # remain .1 bit
+        new_size = int(self.zoomLevel*self.img.size[0]), int(self.zoomLevel*self.img.size[1])
+        self.img2 = self.img.resize(new_size, Image.ANTIALIAS)
+        self.tkimg = ImageTk.PhotoImage(self.img2)
+        self.mainPanel.config(width = max(self.tkimg.width(), 800), height = max(self.tkimg.height(), 600))
         self.mainPanel.create_image(0, 0, image = self.tkimg, anchor=NW)
         self.progLabel.config(text = "%04d/%04d" %(self.cur, self.total))
 
@@ -208,24 +213,30 @@ class LabelTool():
         self.labelfilename = os.path.join(self.outDir, labelname)
         bbox_cnt = 0
         if os.path.exists(self.labelfilename):
+            all_line = []
             with open(self.labelfilename) as f:
                 for (i, line) in enumerate(f):
                     if i == 0:
                         bbox_cnt = int(line.strip())
                         continue
-                    # tmp = [int(t.strip()) for t in line.split()]
-                    tmp = line.split()
-                    #print tmp
-                    self.bboxList.append(tuple(tmp))
-                    tmpId = self.mainPanel.create_rectangle(int(tmp[0]), int(tmp[1]), \
-                                                            int(tmp[2]), int(tmp[3]), \
-                                                            width = 2, \
-                                                            outline = COLORS[(len(self.bboxList)-1) % len(COLORS)])
-                    # print tmpId
-                    self.bboxIdList.append(tmpId)
-                    self.listbox.insert(END, '%s : (%d, %d) -> (%d, %d)' %(tmp[4],int(tmp[0]), int(tmp[1]), \
-                    												  int(tmp[2]), int(tmp[3])))
-                    self.listbox.itemconfig(len(self.bboxIdList) - 1, fg = COLORS[(len(self.bboxIdList) - 1) % len(COLORS)])
+                    all_line.append(line)
+            all_line = sorted(all_line)
+            for line in all_line:
+                tmp = line.split()
+                for i in range(4):
+                    tmp[i] = float(tmp[i])
+                # tmp = [int(t.strip()) for t in line.split()]
+                #print tmp
+                self.bboxList.append(tuple(tmp))
+                tmpId = self.mainPanel.create_rectangle(int(tmp[0] * self.zoomLevel), int(tmp[1] * self.zoomLevel), \
+                                                        int(tmp[2] * self.zoomLevel), int(tmp[3] * self.zoomLevel), \
+                                                        width = 2, \
+                                                        outline = COLORS[(len(self.bboxList)-1) % len(COLORS)])
+                # print tmpId
+                self.bboxIdList.append(tmpId)
+                self.listbox.insert(END, '%s : (%d, %d) -> (%d, %d)' %(tmp[4],int(float(tmp[0])), int(float(tmp[1])), \
+                        int(float(tmp[2])), int(float(tmp[3]))))
+                self.listbox.itemconfig(len(self.bboxIdList) - 1, fg = COLORS[(len(self.bboxIdList) - 1) % len(COLORS)])
 
     def saveImage(self):
         with open(self.labelfilename, 'w') as f:
@@ -234,6 +245,13 @@ class LabelTool():
                 f.write(' '.join(map(str, bbox)) + '\n')
         print 'Image No. %d saved' %(self.cur)
 
+    def lstSelected(self, event):
+        for (i, _) in enumerate(self.bboxIdList):
+            # print i
+            if i in self.listbox.curselection():
+                self.mainPanel.itemconfig(self.bboxIdList[i], width = 10)
+            else:
+                self.mainPanel.itemconfig(self.bboxIdList[i], width = 1)
 
     def mouseClick(self, event):
         if self.STATE['click'] == 0:
@@ -241,10 +259,11 @@ class LabelTool():
         else:
             x1, x2 = min(self.STATE['x'], event.x), max(self.STATE['x'], event.x)
             y1, y2 = min(self.STATE['y'], event.y), max(self.STATE['y'], event.y)
-            self.bboxList.append((x1, y1, x2, y2, self.currentLabelclass))
+            self.bboxList.append((x1/self.zoomLevel, y1/self.zoomLevel, x2/self.zoomLevel, y2/self.zoomLevel, self.currentLabelclass))
             self.bboxIdList.append(self.bboxId)
             self.bboxId = None
-            self.listbox.insert(END, '%s : (%d, %d) -> (%d, %d)' %(self.currentLabelclass,x1, y1, x2, y2))
+            self.listbox.insert(END, '%s : (%d, %d) -> (%d, %d)' %(self.currentLabelclass,
+                x1 / self.zoomLevel, y1 / self.zoomLevel, x2 / self.zoomLevel, y2 / self.zoomLevel))
             self.listbox.itemconfig(len(self.bboxIdList) - 1, fg = COLORS[(len(self.bboxIdList) - 1) % len(COLORS)])
         self.STATE['click'] = 1 - self.STATE['click']
 
